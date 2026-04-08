@@ -1,0 +1,38 @@
+# Compliance Code Scanner
+
+> Multi-framework, policy-as-code compliance scanner for infrastructure and application code. Evaluate Terraform, Kubernetes, Dockerfiles, CI configs, and source code in TypeScript, JavaScript, Python, Go, Java, and Ruby against SOC 2, HIPAA, and NIST CSF, powered by OPA/Rego and Cedar engines.
+
+## Docs
+
+- [Full Documentation](https://docs.prodcycle.com): Complete documentation
+
+## Quick Links
+
+- Package: `npm install -g @prodcycle/compliance-code-scanner`
+- Website: [prodcycle.com](https://prodcycle.com)
+- Status: [status.prodcycle.com](https://status.prodcycle.com)
+
+## Overview
+
+Compliance Code Scanner is a multi-framework, policy-as-code compliance scanner that evaluates infrastructure and application code against SOC 2, HIPAA, and NIST CSF. It uses OPA/Rego and Cedar policy engines.
+
+### Usage modes
+
+- **CLI**: `compliance-code-scanner . --framework soc2,hipaa`
+- **TypeScript SDK**: `scan()`, `gate()`, `runHook()`, `runHookApi()`
+- **AI Agent Hooks**: Auto-configures Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Gemini CLI
+- **REST API**: POST /v1/compliance/hook, POST /v1/compliance/validate, GET /v1/compliance/scans
+
+### Supported frameworks
+
+| Framework | ID | Automated Policies |
+| --- | --- | --- |
+| SOC 2 | soc2 | Yes |
+| HIPAA | hipaa | Yes |
+| NIST CSF | nist-csf | Yes |
+
+### Supported file types
+
+Terraform (.tf), Kubernetes (.yaml), Docker (Dockerfile), Environment (.env),
+CI configs (GitHub Actions, GitLab CI), SQL (.sql), IAM policies (.json),
+Source code (.ts, .tsx, .js, .jsx, .py, .go, .java, .rb)
