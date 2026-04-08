@@ -1,7 +1,15 @@
 {
   "name": "@prodcycle/compliance-code-scanner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Multi-framework policy-as-code compliance scanner for infrastructure and application code.",
+  "homepage": "https://docs.prodcycle.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prodcycle/compliance-code-scanner-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prodcycle/compliance-code-scanner-cli/issues"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -23,7 +31,7 @@
     "security"
   ],
   "author": "ProdCycle, Inc. <engineering@prodcycle.com>",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "commander": "^12.0.0",
     "glob": "^10.3.10",

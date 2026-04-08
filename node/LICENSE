@@ -1,0 +1,52 @@
+Copyright (c) 2025-2026 ProdCycle, Inc. All rights reserved.
+
+This software and associated documentation files (the "Software") are the
+proprietary property of ProdCycle, Inc. and are protected by copyright law.
+
+GRANT OF LICENSE
+
+Subject to valid license key activation and the terms of your ProdCycle
+subscription agreement, ProdCycle, Inc. grants you a limited, non-exclusive,
+non-transferable, revocable license to use the Software solely for your
+internal business purposes.
+
+RESTRICTIONS
+
+You may not, without the prior written consent of ProdCycle, Inc.:
+
+  1. Copy, modify, or create derivative works of the Software;
+  2. Distribute, sublicense, lease, rent, or lend the Software to any
+     third party;
+  3. Reverse engineer, decompile, or disassemble the Software;
+  4. Remove or alter any proprietary notices, labels, or marks on the
+     Software;
+  5. Use the Software to build a competing product or service.
+
+COMPLIANCE POLICIES
+
+The compliance policy definitions (Rego rules, Cedar policies, and framework
+control mappings) included in the `policies/` and `frameworks/` directories
+are provided as part of the Software and are subject to the same license
+terms.
+
+DISCLAIMER OF WARRANTIES
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL PRODCYCLE, INC. BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+TERMINATION
+
+This license is effective until terminated. ProdCycle, Inc. may terminate this
+license at any time if you fail to comply with any term of this agreement.
+Upon termination, you must destroy all copies of the Software in your
+possession.
+
+For licensing inquiries, contact: licensing@prodcycle.com
