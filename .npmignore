@@ -1,0 +1,27 @@
+# Ignores for npm publish
+
+# Exclude source files
+src/
+__tests__/
+tests/
+
+# Config files not needed at runtime
+tsconfig.json
+jest.config.js
+vitest.config.ts
+eslint.config.mjs
+.eslintrc.*
+.prettierrc.*
+
+# Local environment stuff
+.env
+.env.*
+
+# Cache/logs
+.turbo/
+.cache/
+coverage/
+*.log
+
+# Keep dist (compiled code)
+!dist/
