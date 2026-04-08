@@ -1,0 +1,33 @@
+{
+  "name": "@prodcycle/compliance-code-scanner",
+  "version": "0.1.0",
+  "description": "Multi-framework policy-as-code compliance scanner for infrastructure and application code.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "compliance-code-scanner": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "compliance",
+    "soc2",
+    "hipaa",
+    "nist",
+    "cli",
+    "security"
+  ],
+  "author": "ProdCycle, Inc. <engineering@prodcycle.com>",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "glob": "^10.3.10",
+    "ignore": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
