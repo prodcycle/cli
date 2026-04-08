@@ -17,7 +17,7 @@ This package acts as a lightweight Node.js wrapper around the ProdCycle complian
 ## Installation
 
 ```bash
-npm install -g @prodcycle/compliance-code-scanner
+npm install @prodcycle/compliance-code-scanner
 ```
 
 ## Quick Start
