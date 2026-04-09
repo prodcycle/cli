@@ -1,6 +1,6 @@
 {
   "name": "@prodcycle/compliance-code-scanner",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Multi-framework policy-as-code compliance scanner for infrastructure and application code.",
   "homepage": "https://docs.prodcycle.com",
   "repository": {
