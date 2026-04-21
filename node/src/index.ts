@@ -58,21 +58,3 @@ export async function gate(options: GateOptions) {
   };
 }
 
-/**
- * Run local hook
- */
-export async function runHook(params: { frameworks?: string[]; filePath?: string }) {
-  // Logic to read stdin or specific file and call gate
-  const { frameworks = ['soc2'], filePath } = params;
-  
-  // Implementation details...
-  return 0;
-}
-
-/**
- * Run API hook
- */
-export async function runHookApi(params: { apiUrl?: string; apiKey?: string; frameworks?: string[] }) {
-  // Implementation details...
-  return 0;
-}

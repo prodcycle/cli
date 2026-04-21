@@ -8,8 +8,6 @@ __all__ = [
     'ComplianceApiClient',
     'scan',
     'gate',
-    'run_hook',
-    'run_hook_api',
     'format_table',
     'format_prompt',
     'format_sarif',
@@ -70,12 +68,3 @@ def gate(files: dict, frameworks: list[str] = None, severity_threshold: str = "m
         'summary': response.get('summary', {})
     }
 
-def run_hook(frameworks: list[str] = None, file_path: str = None) -> int:
-    if frameworks is None:
-        frameworks = ['soc2']
-    return 0
-
-def run_hook_api(api_url: str = None, api_key: str = None, frameworks: list[str] = None) -> int:
-    if frameworks is None:
-        frameworks = ['soc2']
-    return 0

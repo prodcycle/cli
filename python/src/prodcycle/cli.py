@@ -121,13 +121,88 @@ def _cmd_gate(args):
     sys.exit(response.get('exitCode', 1))
 
 
-def _cmd_hook(_args):
+def _collect_hook_files(file_path):
+    """Resolve files to scan for a `hook` invocation. Supports:
+      --file <path>                                       — read from disk
+      stdin: {"files": {path: content}}                   — gate-compatible
+      stdin: {"file_path": "...", "content": "..."}       — single file
+      stdin: {"tool_input": {"file_path": "...", "content"|"new_string": "..."}}
+              — Claude Code PostToolUse shape.
+    When only a `file_path` is given and it exists, read from disk.
+    """
+    if file_path:
+        absolute = os.path.abspath(file_path)
+        if not os.path.exists(absolute):
+            print(f'hook: --file path does not exist: {absolute}', file=sys.stderr)
+            sys.exit(2)
+        with open(absolute, 'r', encoding='utf-8') as f:
+            return {file_path: f.read()}
+
+    if sys.stdin.isatty():
+        print(
+            'hook: no input. Provide --file <path> or JSON on stdin '
+            '(see `prodcycle hook --help`).',
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    raw = sys.stdin.read()
+    if not raw.strip():
+        print('hook: empty stdin', file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f'hook: invalid JSON on stdin: {e}', file=sys.stderr)
+        sys.exit(2)
+
+    if isinstance(payload, dict) and isinstance(payload.get('files'), dict):
+        return payload['files']
+
+    candidate = (payload or {}).get('tool_input') if isinstance(payload, dict) else None
+    if not isinstance(candidate, dict):
+        candidate = payload if isinstance(payload, dict) else {}
+
+    hook_path = candidate.get('file_path') or candidate.get('path')
+    hook_content = candidate.get('content')
+    if hook_content is None:
+        hook_content = candidate.get('new_string')
+
+    if hook_path and isinstance(hook_content, str):
+        return {hook_path: hook_content}
+
+    if hook_path and os.path.exists(hook_path):
+        with open(hook_path, 'r', encoding='utf-8') as f:
+            return {hook_path: f.read()}
+
     print(
-        'prodcycle hook: not yet implemented. '
-        'Use `prodcycle gate` to POST a JSON {"files":{...}} payload against the hook endpoint.',
+        'hook: stdin payload not recognized. Expected one of:\n'
+        '  {"files": {"path": "content"}}\n'
+        '  {"file_path": "...", "content": "..."}\n'
+        '  {"tool_input": {"file_path": "...", "content": "..."}}',
         file=sys.stderr,
     )
     sys.exit(2)
+
+
+def _cmd_hook(args):
+    frameworks = _parse_list(args.framework) or ['soc2']
+    fmt = args.format or 'prompt'
+
+    files = _collect_hook_files(args.file)
+    if not files:
+        sys.exit(0)
+
+    response = gate(
+        files=files,
+        frameworks=frameworks,
+        api_url=args.api_url,
+        api_key=args.api_key,
+    )
+
+    _write_output(_render(response, fmt), args.output)
+    sys.exit(response.get('exitCode', 1))
 
 
 def _cmd_init(_args):
@@ -164,9 +239,14 @@ def main():
     p_gate.set_defaults(func=_cmd_gate)
 
     # hook
-    p_hook = subparsers.add_parser('hook', help='Run as coding-agent post-edit hook (reads stdin)')
-    p_hook.add_argument('--framework', default='soc2')
-    p_hook.add_argument('--file', help='File path for hook mode (alternative to stdin)')
+    p_hook = subparsers.add_parser('hook', help='Run as coding-agent post-edit hook (reads stdin or --file)')
+    p_hook.add_argument('--framework', default='soc2', help='Comma-separated framework IDs to evaluate')
+    p_hook.add_argument('--format', default='prompt', help='Output format: json, sarif, table, prompt')
+    p_hook.add_argument('--file', help='Scan this file from disk (alternative to reading content from stdin)')
+    p_hook.add_argument('--fail-on', default='critical,high', help='Severities that cause non-zero exit')
+    p_hook.add_argument('--output', help='Write report to file')
+    p_hook.add_argument('--api-url', help='Compliance API base URL (or PC_API_URL env)')
+    p_hook.add_argument('--api-key', help='API key for compliance API (or PC_API_KEY env)')
     p_hook.set_defaults(func=_cmd_hook)
 
     # init

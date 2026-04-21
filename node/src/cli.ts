@@ -173,17 +173,109 @@ program
 // ── hook ────────────────────────────────────────────────────────────────────
 program
   .command('hook')
-  .description('Run as coding-agent post-edit hook (reads stdin)')
+  .description('Run as coding-agent post-edit hook (reads stdin or --file)')
   .option('--framework <ids>', 'Comma-separated framework IDs to evaluate', 'soc2')
-  .option('--file <path>', 'File path for hook mode (alternative to stdin)')
-  .option('--api', 'Use hosted compliance API (default: true)', true)
-  .action(() => {
+  .option('--format <format>', 'Output format: json, sarif, table, prompt', 'prompt')
+  .option('--file <path>', 'Scan this file from disk (alternative to reading content from stdin)')
+  .option('--fail-on <levels>', 'Severities that cause non-zero exit', 'critical,high')
+  .option('--output <file>', 'Write report to file')
+  .option('--api-url <url>', 'Compliance API base URL (or PC_API_URL env)')
+  .option('--api-key <key>', 'API key for compliance API (or PC_API_KEY env)')
+  .action(async (opts: Record<string, any>) => {
+    try {
+      const frameworks = parseList(opts.framework) ?? ['soc2'];
+      const format = (opts.format ?? 'prompt') as Format;
+
+      const files = await collectHookFiles(opts.file);
+      if (!files || Object.keys(files).length === 0) {
+        // No files to check — exit clean so the agent proceeds.
+        process.exit(0);
+        return;
+      }
+
+      const response = await gate({
+        files,
+        frameworks,
+        apiUrl: opts.apiUrl,
+        apiKey: opts.apiKey,
+      });
+
+      writeOutput(renderReport(response, format), opts.output);
+      process.exit(response.exitCode);
+    } catch (error: any) {
+      console.error(`\u2717 Error: ${error.message}`);
+      process.exit(2);
+    }
+  });
+
+/**
+ * Resolve the files to scan for a `hook` invocation. Supports:
+ *   - `--file <path>` — read that file from disk
+ *   - stdin: `{"files": {path: content}}` (same as gate)
+ *   - stdin: `{"file_path": "...", "content": "..."}` (single file)
+ *   - stdin: Claude Code PostToolUse shape —
+ *       `{"tool_input": {"file_path": "...", "content"|"new_string": "..."}}`
+ *     When only `file_path` is given and we can read the file, we do.
+ */
+async function collectHookFiles(
+  filePath: string | undefined,
+): Promise<Record<string, string> | null> {
+  if (filePath) {
+    const absolute = path.resolve(filePath);
+    if (!fs.existsSync(absolute)) {
+      console.error(`hook: --file path does not exist: ${absolute}`);
+      process.exit(2);
+    }
+    const content = fs.readFileSync(absolute, 'utf8');
+    return { [filePath]: content };
+  }
+
+  const stdin = await readStdin();
+  if (!stdin.trim()) {
     console.error(
-      'prodcycle hook: not yet implemented. ' +
-        'Use `prodcycle gate` to POST a JSON {files:{...}} payload against the hook endpoint.',
+      'hook: no input. Provide --file <path> or JSON on stdin (see `prodcycle hook --help`).',
     );
     process.exit(2);
-  });
+  }
+
+  let payload: any;
+  try {
+    payload = JSON.parse(stdin);
+  } catch (e: any) {
+    console.error(`hook: invalid JSON on stdin: ${e.message}`);
+    process.exit(2);
+  }
+
+  // Shape 1: {"files": {path: content}} — gate-compatible
+  if (payload && typeof payload.files === 'object' && payload.files !== null) {
+    return payload.files;
+  }
+
+  // Shape 2: top-level single file. Shape 3: Claude Code tool_input nesting.
+  const candidate = payload?.tool_input ?? payload;
+  const hookFilePath: string | undefined = candidate?.file_path ?? candidate?.path;
+  const hookContent: string | undefined = candidate?.content ?? candidate?.new_string;
+
+  if (hookFilePath && typeof hookContent === 'string') {
+    return { [hookFilePath]: hookContent };
+  }
+
+  if (hookFilePath && fs.existsSync(hookFilePath)) {
+    // Only a path was given — read from disk so post-edit hooks still work
+    // when the agent doesn't ship the content inline.
+    const content = fs.readFileSync(hookFilePath, 'utf8');
+    return { [hookFilePath]: content };
+  }
+
+  console.error(
+    'hook: stdin payload not recognized. Expected one of:\n' +
+      '  {"files": {"path": "content"}}\n' +
+      '  {"file_path": "...", "content": "..."}\n' +
+      '  {"tool_input": {"file_path": "...", "content": "..."}}',
+  );
+  process.exit(2);
+  return null; // unreachable
+}
 
 // ── init ────────────────────────────────────────────────────────────────────
 program
