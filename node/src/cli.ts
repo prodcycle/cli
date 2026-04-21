@@ -281,14 +281,151 @@ async function collectHookFiles(
 program
   .command('init')
   .description('Configure compliance hooks for coding agents')
-  .option('--agent <agents>', 'Comma-separated agents to configure (claude, cursor, ...)')
-  .action(() => {
-    console.error(
-      'prodcycle init: not yet implemented. ' +
-        'Manual setup: configure your agent to pipe its post-edit file to `prodcycle gate`.',
-    );
-    process.exit(2);
+  .option(
+    '--agent <agents>',
+    'Comma-separated agents to configure (claude, cursor). Default: auto-detect.',
+  )
+  .option('--force', 'Overwrite existing compliance hook entries')
+  .option('--dir <path>', 'Project directory to configure', '.')
+  .action((opts: Record<string, any>) => {
+    try {
+      const dir = path.resolve(opts.dir ?? '.');
+      const agents = resolveAgents(opts.agent, dir);
+
+      if (agents.length === 0) {
+        console.error(
+          'init: no agents selected and none auto-detected. ' +
+            'Use --agent claude (or cursor) to configure explicitly.',
+        );
+        process.exit(2);
+      }
+
+      let anyFailed = false;
+      for (const agent of agents) {
+        const result = configureAgent(agent, dir, !!opts.force);
+        process.stdout.write(result.message + '\n');
+        if (result.status === 'failed') anyFailed = true;
+      }
+      process.exit(anyFailed ? 1 : 0);
+    } catch (error: any) {
+      console.error(`\u2717 Error: ${error.message}`);
+      process.exit(2);
+    }
   });
+
+type AgentName = 'claude' | 'cursor';
+
+function resolveAgents(userChoice: string | undefined, dir: string): AgentName[] {
+  if (userChoice) {
+    const list = parseList(userChoice) ?? [];
+    const valid: AgentName[] = [];
+    for (const name of list) {
+      if (name === 'claude' || name === 'cursor') valid.push(name);
+      else console.error(`init: unknown agent "${name}" — ignoring`);
+    }
+    return valid;
+  }
+
+  // Auto-detect
+  const detected: AgentName[] = [];
+  if (fs.existsSync(path.join(dir, '.claude'))) detected.push('claude');
+  if (fs.existsSync(path.join(dir, '.cursor'))) detected.push('cursor');
+  return detected;
+}
+
+type InitResult = { status: 'installed' | 'already' | 'failed'; message: string };
+
+function configureAgent(agent: AgentName, dir: string, force: boolean): InitResult {
+  switch (agent) {
+    case 'claude':
+      return configureClaudeCode(dir, force);
+    case 'cursor':
+      return {
+        status: 'failed',
+        message:
+          '[cursor] skipped — Cursor does not currently expose a post-edit hook mechanism.\n' +
+          '         Add a `.cursor/rules` entry pointing reviewers at `prodcycle scan .` until hook support lands.',
+      };
+  }
+}
+
+interface ClaudeHookEntry {
+  type: 'command';
+  command: string;
+}
+
+interface ClaudeMatcherBlock {
+  matcher?: string;
+  hooks?: ClaudeHookEntry[];
+}
+
+interface ClaudeSettings {
+  hooks?: {
+    PostToolUse?: ClaudeMatcherBlock[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+const CLAUDE_MATCHER = 'Write|Edit|MultiEdit';
+const CLAUDE_COMMAND = 'prodcycle hook';
+
+function configureClaudeCode(dir: string, force: boolean): InitResult {
+  const claudeDir = path.join(dir, '.claude');
+  const settingsPath = path.join(claudeDir, 'settings.json');
+
+  let settings: ClaudeSettings = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as ClaudeSettings;
+      if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
+        return {
+          status: 'failed',
+          message: `[claude] ${settingsPath} is not a JSON object — refusing to overwrite. Fix the file manually.`,
+        };
+      }
+    } catch (e: any) {
+      return {
+        status: 'failed',
+        message: `[claude] could not parse ${settingsPath}: ${e.message}. Fix the file manually.`,
+      };
+    }
+  }
+
+  const hooks = (settings.hooks ??= {});
+  const postToolUse = (hooks.PostToolUse ??= []);
+
+  // Look for an existing prodcycle entry
+  const existing = postToolUse.find((b) =>
+    b.hooks?.some((h) => h.type === 'command' && h.command.trim().startsWith('prodcycle hook')),
+  );
+
+  if (existing && !force) {
+    return {
+      status: 'already',
+      message: `[claude] PostToolUse hook for prodcycle already present in ${settingsPath}. Use --force to rewrite.`,
+    };
+  }
+
+  if (existing && force) {
+    // Replace in place — preserve the matcher, rewrite the command to the canonical form
+    existing.matcher = CLAUDE_MATCHER;
+    existing.hooks = [{ type: 'command', command: CLAUDE_COMMAND }];
+  } else {
+    postToolUse.push({
+      matcher: CLAUDE_MATCHER,
+      hooks: [{ type: 'command', command: CLAUDE_COMMAND }],
+    });
+  }
+
+  if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+
+  return {
+    status: 'installed',
+    message: `[claude] wrote PostToolUse hook to ${settingsPath}. Requires PC_API_KEY in the environment when Claude Code runs.`,
+  };
+}
 
 function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
