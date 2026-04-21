@@ -205,13 +205,122 @@ def _cmd_hook(args):
     sys.exit(response.get('exitCode', 1))
 
 
-def _cmd_init(_args):
-    print(
-        'prodcycle init: not yet implemented. '
-        'Manual setup: configure your agent to pipe its post-edit file to `prodcycle gate`.',
-        file=sys.stderr,
+CLAUDE_MATCHER = 'Write|Edit|MultiEdit'
+CLAUDE_COMMAND = 'prodcycle hook'
+
+
+def _resolve_agents(user_choice, directory):
+    if user_choice:
+        parsed = _parse_list(user_choice) or []
+        valid = []
+        for name in parsed:
+            if name in ('claude', 'cursor'):
+                valid.append(name)
+            else:
+                print(f'init: unknown agent "{name}" — ignoring', file=sys.stderr)
+        return valid
+
+    detected = []
+    if os.path.exists(os.path.join(directory, '.claude')):
+        detected.append('claude')
+    if os.path.exists(os.path.join(directory, '.cursor')):
+        detected.append('cursor')
+    return detected
+
+
+def _configure_claude(directory, force):
+    claude_dir = os.path.join(directory, '.claude')
+    settings_path = os.path.join(claude_dir, 'settings.json')
+
+    settings = {}
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+        except json.JSONDecodeError as e:
+            return ('failed', f'[claude] could not parse {settings_path}: {e}. Fix the file manually.')
+        if not isinstance(settings, dict):
+            return ('failed', f'[claude] {settings_path} is not a JSON object — refusing to overwrite.')
+
+    hooks = settings.setdefault('hooks', {})
+    post_tool_use = hooks.setdefault('PostToolUse', [])
+
+    existing = None
+    for block in post_tool_use:
+        if not isinstance(block, dict):
+            continue
+        for h in block.get('hooks', []) or []:
+            if (
+                isinstance(h, dict)
+                and h.get('type') == 'command'
+                and isinstance(h.get('command'), str)
+                and h['command'].strip().startswith('prodcycle hook')
+            ):
+                existing = block
+                break
+        if existing:
+            break
+
+    if existing and not force:
+        return (
+            'already',
+            f'[claude] PostToolUse hook for prodcycle already present in {settings_path}. '
+            'Use --force to rewrite.',
+        )
+
+    if existing and force:
+        existing['matcher'] = CLAUDE_MATCHER
+        existing['hooks'] = [{'type': 'command', 'command': CLAUDE_COMMAND}]
+    else:
+        post_tool_use.append({
+            'matcher': CLAUDE_MATCHER,
+            'hooks': [{'type': 'command', 'command': CLAUDE_COMMAND}],
+        })
+
+    os.makedirs(claude_dir, exist_ok=True)
+    with open(settings_path, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, indent=2)
+        f.write('\n')
+
+    return (
+        'installed',
+        f'[claude] wrote PostToolUse hook to {settings_path}. '
+        'Requires PC_API_KEY in the environment when Claude Code runs.',
     )
-    sys.exit(2)
+
+
+def _configure_agent(agent, directory, force):
+    if agent == 'claude':
+        return _configure_claude(directory, force)
+    if agent == 'cursor':
+        return (
+            'failed',
+            '[cursor] skipped — Cursor does not currently expose a post-edit hook mechanism.\n'
+            '         Add a `.cursor/rules` entry pointing reviewers at `prodcycle scan .` until hook support lands.',
+        )
+    return ('failed', f'[{agent}] unknown agent')
+
+
+def _cmd_init(args):
+    directory = os.path.abspath(args.dir or '.')
+    agents = _resolve_agents(args.agent, directory)
+
+    if not agents:
+        print(
+            'init: no agents selected and none auto-detected. '
+            'Use --agent claude (or cursor) to configure explicitly.',
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    any_failed = False
+    for agent in agents:
+        status, message = _configure_agent(agent, directory, bool(args.force))
+        print(message)
+        if status == 'failed':
+            any_failed = True
+
+    sys.exit(1 if any_failed else 0)
 
 
 def main():
@@ -251,7 +360,12 @@ def main():
 
     # init
     p_init = subparsers.add_parser('init', help='Configure compliance hooks for coding agents')
-    p_init.add_argument('--agent', help='Comma-separated agents to configure (claude, cursor, ...)')
+    p_init.add_argument(
+        '--agent',
+        help='Comma-separated agents to configure (claude, cursor). Default: auto-detect.',
+    )
+    p_init.add_argument('--force', action='store_true', help='Overwrite existing compliance hook entries')
+    p_init.add_argument('--dir', default='.', help='Project directory to configure')
     p_init.set_defaults(func=_cmd_init)
 
     args = parser.parse_args(argv[1:])
