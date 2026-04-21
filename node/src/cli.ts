@@ -71,7 +71,7 @@ program
   .description(
     'Multi-framework policy-as-code compliance scanner for infrastructure and application code.',
   )
-  .version('0.3.0');
+  .version('0.4.0');
 
 // ── scan ────────────────────────────────────────────────────────────────────
 program
@@ -283,7 +283,7 @@ program
   .description('Configure compliance hooks for coding agents')
   .option(
     '--agent <agents>',
-    'Comma-separated agents to configure (claude, cursor). Default: auto-detect.',
+    'Comma-separated agents to configure (claude, cursor, codex, opencode, github-copilot, gemini-cli). Use "all" to configure every agent. Default: auto-detect.',
   )
   .option('--force', 'Overwrite existing compliance hook entries')
   .option('--dir <path>', 'Project directory to configure', '.')
@@ -295,14 +295,16 @@ program
       if (agents.length === 0) {
         console.error(
           'init: no agents selected and none auto-detected. ' +
-            'Use --agent claude (or cursor) to configure explicitly.',
+            'Use --agent <name> to configure explicitly (claude, cursor, codex, ' +
+            'opencode, github-copilot, gemini-cli, or "all").',
         );
         process.exit(2);
       }
 
       let anyFailed = false;
+      const writtenPaths = new Set<string>();
       for (const agent of agents) {
-        const result = configureAgent(agent, dir, !!opts.force);
+        const result = configureAgent(agent, dir, !!opts.force, writtenPaths);
         process.stdout.write(result.message + '\n');
         if (result.status === 'failed') anyFailed = true;
       }
@@ -313,39 +315,84 @@ program
     }
   });
 
-type AgentName = 'claude' | 'cursor';
+type AgentName =
+  | 'claude'
+  | 'cursor'
+  | 'codex'
+  | 'opencode'
+  | 'github-copilot'
+  | 'gemini-cli';
+
+const ALL_AGENTS: AgentName[] = [
+  'claude',
+  'cursor',
+  'codex',
+  'opencode',
+  'github-copilot',
+  'gemini-cli',
+];
+
+function isAgentName(name: string): name is AgentName {
+  return (ALL_AGENTS as string[]).includes(name);
+}
 
 function resolveAgents(userChoice: string | undefined, dir: string): AgentName[] {
   if (userChoice) {
     const list = parseList(userChoice) ?? [];
+    if (list.length === 1 && list[0] === 'all') return ALL_AGENTS.slice();
     const valid: AgentName[] = [];
     for (const name of list) {
-      if (name === 'claude' || name === 'cursor') valid.push(name);
+      if (isAgentName(name)) valid.push(name);
       else console.error(`init: unknown agent "${name}" — ignoring`);
     }
     return valid;
   }
 
-  // Auto-detect
+  // Auto-detect: look for config dirs/files that indicate the agent is already in use.
   const detected: AgentName[] = [];
   if (fs.existsSync(path.join(dir, '.claude'))) detected.push('claude');
   if (fs.existsSync(path.join(dir, '.cursor'))) detected.push('cursor');
+  if (fs.existsSync(path.join(dir, '.codex'))) detected.push('codex');
+  if (fs.existsSync(path.join(dir, '.opencode'))) detected.push('opencode');
+  if (fs.existsSync(path.join(dir, '.github', 'copilot-instructions.md'))) {
+    detected.push('github-copilot');
+  }
+  if (
+    fs.existsSync(path.join(dir, 'GEMINI.md')) ||
+    fs.existsSync(path.join(dir, '.gemini'))
+  ) {
+    detected.push('gemini-cli');
+  }
   return detected;
 }
 
 type InitResult = { status: 'installed' | 'already' | 'failed'; message: string };
 
-function configureAgent(agent: AgentName, dir: string, force: boolean): InitResult {
+function configureAgent(
+  agent: AgentName,
+  dir: string,
+  force: boolean,
+  writtenPaths: Set<string>,
+): InitResult {
   switch (agent) {
     case 'claude':
       return configureClaudeCode(dir, force);
     case 'cursor':
-      return {
-        status: 'failed',
-        message:
-          '[cursor] skipped — Cursor does not currently expose a post-edit hook mechanism.\n' +
-          '         Add a `.cursor/rules` entry pointing reviewers at `prodcycle scan .` until hook support lands.',
-      };
+      return configureCursor(dir, force);
+    case 'codex':
+      return configureInstructionFile(agent, dir, 'AGENTS.md', force, writtenPaths);
+    case 'opencode':
+      return configureInstructionFile(agent, dir, 'AGENTS.md', force, writtenPaths);
+    case 'github-copilot':
+      return configureInstructionFile(
+        agent,
+        dir,
+        path.join('.github', 'copilot-instructions.md'),
+        force,
+        writtenPaths,
+      );
+    case 'gemini-cli':
+      return configureInstructionFile(agent, dir, 'GEMINI.md', force, writtenPaths);
   }
 }
 
@@ -425,6 +472,163 @@ function configureClaudeCode(dir: string, force: boolean): InitResult {
     status: 'installed',
     message: `[claude] wrote PostToolUse hook to ${settingsPath}. Requires PC_API_KEY in the environment when Claude Code runs.`,
   };
+}
+
+// ── Cursor ──────────────────────────────────────────────────────────────────
+
+interface CursorHookEntry {
+  command: string;
+  [key: string]: unknown;
+}
+
+interface CursorHooksConfig {
+  version?: number;
+  hooks?: {
+    afterFileEdit?: CursorHookEntry[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+const CURSOR_COMMAND = 'prodcycle hook';
+
+function configureCursor(dir: string, force: boolean): InitResult {
+  const cursorDir = path.join(dir, '.cursor');
+  const hooksPath = path.join(cursorDir, 'hooks.json');
+
+  let config: CursorHooksConfig = { version: 1 };
+  if (fs.existsSync(hooksPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(hooksPath, 'utf8')) as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return {
+          status: 'failed',
+          message: `[cursor] ${hooksPath} is not a JSON object — refusing to overwrite. Fix the file manually.`,
+        };
+      }
+      config = parsed as CursorHooksConfig;
+    } catch (e: any) {
+      return {
+        status: 'failed',
+        message: `[cursor] could not parse ${hooksPath}: ${e.message}. Fix the file manually.`,
+      };
+    }
+  }
+
+  if (typeof config.version !== 'number') config.version = 1;
+  const hooks = (config.hooks ??= {});
+  const afterFileEdit = (hooks.afterFileEdit ??= []);
+
+  const existing = afterFileEdit.find(
+    (h) => typeof h.command === 'string' && h.command.trim().startsWith('prodcycle hook'),
+  );
+
+  if (existing && !force) {
+    return {
+      status: 'already',
+      message: `[cursor] afterFileEdit hook for prodcycle already present in ${hooksPath}. Use --force to rewrite.`,
+    };
+  }
+
+  if (existing && force) {
+    existing.command = CURSOR_COMMAND;
+  } else {
+    afterFileEdit.push({ command: CURSOR_COMMAND });
+  }
+
+  if (!fs.existsSync(cursorDir)) fs.mkdirSync(cursorDir, { recursive: true });
+  fs.writeFileSync(hooksPath, JSON.stringify(config, null, 2) + '\n');
+
+  return {
+    status: 'installed',
+    message: `[cursor] wrote afterFileEdit hook to ${hooksPath}. Requires PC_API_KEY in the environment when Cursor runs.`,
+  };
+}
+
+// ── Instruction-file agents (codex, opencode, github-copilot, gemini-cli) ───
+
+const INSTRUCTION_BEGIN = '<!-- prodcycle:begin -->';
+const INSTRUCTION_END = '<!-- prodcycle:end -->';
+
+function buildInstructionBlock(): string {
+  return [
+    INSTRUCTION_BEGIN,
+    '## ProdCycle Compliance',
+    '',
+    'This project enforces SOC 2, HIPAA, and NIST CSF policies on infrastructure',
+    'and application code. After creating or modifying any file, run the compliance',
+    'scanner and fix every violation before continuing:',
+    '',
+    '```bash',
+    'npx prodcycle scan . --format prompt',
+    '```',
+    '',
+    'Each finding includes a severity, rule ID, message, and remediation guidance.',
+    'Apply the fixes, then re-run the scan until every check passes.',
+    INSTRUCTION_END,
+    '',
+  ].join('\n');
+}
+
+function configureInstructionFile(
+  agent: AgentName,
+  dir: string,
+  relPath: string,
+  force: boolean,
+  writtenPaths: Set<string>,
+): InitResult {
+  const fullPath = path.join(dir, relPath);
+
+  // Multiple agents may share the same target file (codex + opencode → AGENTS.md).
+  // Skip the second agent silently if we already wrote to the same file in this run.
+  if (writtenPaths.has(fullPath)) {
+    return {
+      status: 'already',
+      message: `[${agent}] ${relPath} already written in this run (shared with another agent).`,
+    };
+  }
+
+  let existing = '';
+  if (fs.existsSync(fullPath)) {
+    existing = fs.readFileSync(fullPath, 'utf8');
+  }
+
+  const block = buildInstructionBlock();
+  const hasBlock =
+    existing.includes(INSTRUCTION_BEGIN) && existing.includes(INSTRUCTION_END);
+
+  if (hasBlock && !force) {
+    return {
+      status: 'already',
+      message: `[${agent}] prodcycle instruction block already present in ${fullPath}. Use --force to rewrite.`,
+    };
+  }
+
+  let next: string;
+  if (hasBlock) {
+    const pattern = new RegExp(
+      `${escapeRegExp(INSTRUCTION_BEGIN)}[\\s\\S]*?${escapeRegExp(INSTRUCTION_END)}\\n?`,
+    );
+    next = existing.replace(pattern, block);
+  } else if (existing.trim().length === 0) {
+    next = block;
+  } else {
+    next = existing.replace(/\n*$/, '\n\n') + block;
+  }
+
+  const parent = path.dirname(fullPath);
+  if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+  fs.writeFileSync(fullPath, next);
+  writtenPaths.add(fullPath);
+
+  return {
+    status: 'installed',
+    message: `[${agent}] wrote compliance instructions to ${fullPath}.`,
+  };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function readStdin(): Promise<string> {

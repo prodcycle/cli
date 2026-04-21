@@ -30,7 +30,9 @@ The Node and Python implementations are intentionally kept symmetric — behavio
 - `prodcycle scan [path]` — full repo scan (replaces the old top-level `prodcycle .`; the bare-path form still works via a back-compat shim that injects `scan`).
 - `prodcycle gate` — evaluates a JSON payload of files from stdin (low-latency `/compliance/hook` endpoint).
 - `prodcycle hook` — coding-agent post-edit hook. Reads stdin in multiple shapes (`{files}`, `{file_path, content}`, Claude Code PostToolUse `{tool_input: ...}`) or `--file <path>`.
-- `prodcycle init` — writes compliance hook config for Claude Code / Cursor into the project (`.claude/settings.json`, `.cursor/hooks.json`). Auto-detects agents; supports `--agent`, `--force`, `--dir`.
+- `prodcycle init` — configures compliance hooks/instructions for supported coding agents. Auto-detects agents by checking for their config dirs/files; supports `--agent`, `--force`, `--dir`, and `--agent all`.
+  - Hook agents (JSON config): `claude` → `.claude/settings.json` (PostToolUse), `cursor` → `.cursor/hooks.json` (afterFileEdit).
+  - Instruction agents (sentinel-delimited markdown block): `codex` and `opencode` → `AGENTS.md` (shared), `github-copilot` → `.github/copilot-instructions.md`, `gemini-cli` → `GEMINI.md`.
 
 ## Key Commands
 

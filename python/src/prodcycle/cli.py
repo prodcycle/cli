@@ -207,24 +207,44 @@ def _cmd_hook(args):
 
 CLAUDE_MATCHER = 'Write|Edit|MultiEdit'
 CLAUDE_COMMAND = 'prodcycle hook'
+CURSOR_COMMAND = 'prodcycle hook'
+
+ALL_AGENTS = ['claude', 'cursor', 'codex', 'opencode', 'github-copilot', 'gemini-cli']
+
+INSTRUCTION_BEGIN = '<!-- prodcycle:begin -->'
+INSTRUCTION_END = '<!-- prodcycle:end -->'
 
 
 def _resolve_agents(user_choice, directory):
     if user_choice:
         parsed = _parse_list(user_choice) or []
+        if parsed == ['all']:
+            return list(ALL_AGENTS)
         valid = []
         for name in parsed:
-            if name in ('claude', 'cursor'):
+            if name in ALL_AGENTS:
                 valid.append(name)
             else:
                 print(f'init: unknown agent "{name}" — ignoring', file=sys.stderr)
         return valid
 
+    # Auto-detect: look for config dirs/files that indicate the agent is already in use.
     detected = []
     if os.path.exists(os.path.join(directory, '.claude')):
         detected.append('claude')
     if os.path.exists(os.path.join(directory, '.cursor')):
         detected.append('cursor')
+    if os.path.exists(os.path.join(directory, '.codex')):
+        detected.append('codex')
+    if os.path.exists(os.path.join(directory, '.opencode')):
+        detected.append('opencode')
+    if os.path.exists(os.path.join(directory, '.github', 'copilot-instructions.md')):
+        detected.append('github-copilot')
+    if (
+        os.path.exists(os.path.join(directory, 'GEMINI.md'))
+        or os.path.exists(os.path.join(directory, '.gemini'))
+    ):
+        detected.append('gemini-cli')
     return detected
 
 
@@ -289,15 +309,139 @@ def _configure_claude(directory, force):
     )
 
 
-def _configure_agent(agent, directory, force):
+def _configure_cursor(directory, force):
+    cursor_dir = os.path.join(directory, '.cursor')
+    hooks_path = os.path.join(cursor_dir, 'hooks.json')
+
+    config = {'version': 1}
+    if os.path.exists(hooks_path):
+        try:
+            with open(hooks_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except json.JSONDecodeError as e:
+            return ('failed', f'[cursor] could not parse {hooks_path}: {e}. Fix the file manually.')
+        if not isinstance(config, dict):
+            return ('failed', f'[cursor] {hooks_path} is not a JSON object — refusing to overwrite.')
+
+    if not isinstance(config.get('version'), int):
+        config['version'] = 1
+    hooks = config.setdefault('hooks', {})
+    after_file_edit = hooks.setdefault('afterFileEdit', [])
+
+    existing = None
+    for h in after_file_edit:
+        if (
+            isinstance(h, dict)
+            and isinstance(h.get('command'), str)
+            and h['command'].strip().startswith('prodcycle hook')
+        ):
+            existing = h
+            break
+
+    if existing and not force:
+        return (
+            'already',
+            f'[cursor] afterFileEdit hook for prodcycle already present in {hooks_path}. '
+            'Use --force to rewrite.',
+        )
+
+    if existing and force:
+        existing['command'] = CURSOR_COMMAND
+    else:
+        after_file_edit.append({'command': CURSOR_COMMAND})
+
+    os.makedirs(cursor_dir, exist_ok=True)
+    with open(hooks_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2)
+        f.write('\n')
+
+    return (
+        'installed',
+        f'[cursor] wrote afterFileEdit hook to {hooks_path}. '
+        'Requires PC_API_KEY in the environment when Cursor runs.',
+    )
+
+
+def _instruction_block():
+    return '\n'.join([
+        INSTRUCTION_BEGIN,
+        '## ProdCycle Compliance',
+        '',
+        'This project enforces SOC 2, HIPAA, and NIST CSF policies on infrastructure',
+        'and application code. After creating or modifying any file, run the compliance',
+        'scanner and fix every violation before continuing:',
+        '',
+        '```bash',
+        'npx prodcycle scan . --format prompt',
+        '```',
+        '',
+        'Each finding includes a severity, rule ID, message, and remediation guidance.',
+        'Apply the fixes, then re-run the scan until every check passes.',
+        INSTRUCTION_END,
+        '',
+    ])
+
+
+def _configure_instruction_file(agent, directory, rel_path, force, written_paths):
+    import re
+
+    full_path = os.path.join(directory, rel_path)
+
+    # Multiple agents may share the same target file (codex + opencode → AGENTS.md).
+    if full_path in written_paths:
+        return (
+            'already',
+            f'[{agent}] {rel_path} already written in this run (shared with another agent).',
+        )
+
+    existing = ''
+    if os.path.exists(full_path):
+        with open(full_path, 'r', encoding='utf-8') as f:
+            existing = f.read()
+
+    block = _instruction_block()
+    has_block = INSTRUCTION_BEGIN in existing and INSTRUCTION_END in existing
+
+    if has_block and not force:
+        return (
+            'already',
+            f'[{agent}] prodcycle instruction block already present in {full_path}. '
+            'Use --force to rewrite.',
+        )
+
+    if has_block:
+        pattern = re.compile(
+            re.escape(INSTRUCTION_BEGIN) + r'[\s\S]*?' + re.escape(INSTRUCTION_END) + r'\n?'
+        )
+        next_content = pattern.sub(block, existing)
+    elif not existing.strip():
+        next_content = block
+    else:
+        next_content = existing.rstrip('\n') + '\n\n' + block
+
+    parent = os.path.dirname(full_path)
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent, exist_ok=True)
+    with open(full_path, 'w', encoding='utf-8') as f:
+        f.write(next_content)
+    written_paths.add(full_path)
+
+    return ('installed', f'[{agent}] wrote compliance instructions to {full_path}.')
+
+
+def _configure_agent(agent, directory, force, written_paths):
     if agent == 'claude':
         return _configure_claude(directory, force)
     if agent == 'cursor':
-        return (
-            'failed',
-            '[cursor] skipped — Cursor does not currently expose a post-edit hook mechanism.\n'
-            '         Add a `.cursor/rules` entry pointing reviewers at `prodcycle scan .` until hook support lands.',
+        return _configure_cursor(directory, force)
+    if agent in ('codex', 'opencode'):
+        return _configure_instruction_file(agent, directory, 'AGENTS.md', force, written_paths)
+    if agent == 'github-copilot':
+        return _configure_instruction_file(
+            agent, directory, os.path.join('.github', 'copilot-instructions.md'), force, written_paths,
         )
+    if agent == 'gemini-cli':
+        return _configure_instruction_file(agent, directory, 'GEMINI.md', force, written_paths)
     return ('failed', f'[{agent}] unknown agent')
 
 
@@ -308,14 +452,16 @@ def _cmd_init(args):
     if not agents:
         print(
             'init: no agents selected and none auto-detected. '
-            'Use --agent claude (or cursor) to configure explicitly.',
+            'Use --agent <name> to configure explicitly (claude, cursor, codex, '
+            'opencode, github-copilot, gemini-cli, or "all").',
             file=sys.stderr,
         )
         sys.exit(2)
 
     any_failed = False
+    written_paths = set()
     for agent in agents:
-        status, message = _configure_agent(agent, directory, bool(args.force))
+        status, message = _configure_agent(agent, directory, bool(args.force), written_paths)
         print(message)
         if status == 'failed':
             any_failed = True
@@ -362,7 +508,11 @@ def main():
     p_init = subparsers.add_parser('init', help='Configure compliance hooks for coding agents')
     p_init.add_argument(
         '--agent',
-        help='Comma-separated agents to configure (claude, cursor). Default: auto-detect.',
+        help=(
+            'Comma-separated agents to configure (claude, cursor, codex, opencode, '
+            'github-copilot, gemini-cli). Use "all" to configure every agent. '
+            'Default: auto-detect.'
+        ),
     )
     p_init.add_argument('--force', action='store_true', help='Overwrite existing compliance hook entries')
     p_init.add_argument('--dir', default='.', help='Project directory to configure')
