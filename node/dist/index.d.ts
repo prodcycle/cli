@@ -17,34 +17,19 @@ export declare function scan(params: {
     report: null;
     summary?: undefined;
 } | {
-    passed: any;
+    passed: boolean;
     exitCode: number;
-    findings: any;
-    report: any;
-    summary: any;
+    findings: unknown[];
+    report: unknown;
+    summary: unknown;
 }>;
 /**
  * Gate code strings directly without writing to disk
  */
 export declare function gate(options: GateOptions): Promise<{
-    passed: any;
+    passed: boolean;
     exitCode: number;
-    findings: any;
-    prompt: any;
-    summary: any;
+    findings: unknown[];
+    prompt: string | undefined;
+    summary: unknown;
 }>;
-/**
- * Run local hook
- */
-export declare function runHook(params: {
-    frameworks?: string[];
-    filePath?: string;
-}): Promise<number>;
-/**
- * Run API hook
- */
-export declare function runHookApi(params: {
-    apiUrl?: string;
-    apiKey?: string;
-    frameworks?: string[];
-}): Promise<number>;

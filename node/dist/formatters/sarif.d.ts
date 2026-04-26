@@ -1,1 +1,1 @@
-export declare function formatSarif(report: any): any;
+export declare function formatSarif(report: unknown): object;
