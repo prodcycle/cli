@@ -16,8 +16,6 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.scan = scan;
 exports.gate = gate;
-exports.runHook = runHook;
-exports.runHookApi = runHookApi;
 const api_client_1 = require("./api-client");
 const fs_1 = require("./utils/fs");
 __exportStar(require("./api-client"), exports);
@@ -55,7 +53,7 @@ async function scan(params) {
 async function gate(options) {
     const { files, frameworks = ['soc2'], ...scanOpts } = options;
     const client = new api_client_1.ComplianceApiClient(options.apiUrl, options.apiKey);
-    const response = await client.hook(files, frameworks);
+    const response = await client.hook(files, frameworks, scanOpts);
     return {
         passed: response.passed,
         exitCode: response.passed ? 0 : 1,
@@ -63,20 +61,4 @@ async function gate(options) {
         prompt: response.prompt,
         summary: response.summary
     };
-}
-/**
- * Run local hook
- */
-async function runHook(params) {
-    // Logic to read stdin or specific file and call gate
-    const { frameworks = ['soc2'], filePath } = params;
-    // Implementation details...
-    return 0;
-}
-/**
- * Run API hook
- */
-async function runHookApi(params) {
-    // Implementation details...
-    return 0;
 }

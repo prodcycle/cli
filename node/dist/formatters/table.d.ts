@@ -1,1 +1,1 @@
-export declare function formatTable(report: any): string;
+export declare function formatTable(report: unknown): string;
